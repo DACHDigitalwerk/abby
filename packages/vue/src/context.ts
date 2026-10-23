@@ -310,13 +310,16 @@ export function createAbby<
       },
     },
     setup(props, { slots }) {
-      const initialProjectData = props.initialData
-        ? abby.init(props.initialData)
-        : abby.getProjectData();
+      const targetAbby =
+        typeof window === "undefined" ? createAbbyInstance() : abby;
 
       if (props.cookies) {
-        abby.setLocalOverrides(props.cookies);
+        targetAbby.setLocalOverrides(props.cookies);
       }
+
+      const initialProjectData = props.initialData
+        ? targetAbby.init(props.initialData)
+        : targetAbby.getProjectData();
 
       const data = ref(initialProjectData) as Ref<AbbyProjectData>;
       provide(AbbyContextKey, data);
@@ -325,13 +328,13 @@ export function createAbby<
       let unsubscribe: (() => void) | undefined;
 
       onMounted(() => {
-        unsubscribe = abby.subscribe((newData) => {
+        unsubscribe = targetAbby.subscribe((newData) => {
           data.value = newData;
         });
 
         if (!props.initialData && !isMounted) {
           isMounted = true;
-          abby.loadProjectData().then((loadedData) => {
+          targetAbby.loadProjectData().then((loadedData) => {
             if (!loadedData) return;
             data.value = loadedData;
           });
