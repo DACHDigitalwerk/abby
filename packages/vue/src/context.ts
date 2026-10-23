@@ -75,48 +75,51 @@ export function createAbby<
 ) {
   const config = abbyConfig;
 
-  const abby = new Abby<
-    FlagName,
-    TestName,
-    Tests,
-    RemoteConfig,
-    RemoteConfigName,
-    string[],
-    User
-  >(
-    abbyConfig,
-    {
-      get: (key: string) => {
-        if (typeof window === "undefined") return null;
-        return TestStorageService.get(abbyConfig.projectId, key);
+  const createAbbyInstance = () =>
+    new Abby<
+      FlagName,
+      TestName,
+      Tests,
+      RemoteConfig,
+      RemoteConfigName,
+      string[],
+      User
+    >(
+      abbyConfig,
+      {
+        get: (key: string) => {
+          if (typeof window === "undefined") return null;
+          return TestStorageService.get(abbyConfig.projectId, key);
+        },
+        set: (key: string, value: any) => {
+          if (typeof window === "undefined" || config.cookies?.disableByDefault)
+            return;
+          TestStorageService.set(abbyConfig.projectId, key, value);
+        },
       },
-      set: (key: string, value: any) => {
-        if (typeof window === "undefined" || config.cookies?.disableByDefault)
-          return;
-        TestStorageService.set(abbyConfig.projectId, key, value);
+      {
+        get: (key: string) => {
+          if (typeof window === "undefined") return null;
+          return FlagStorageService.get(abbyConfig.projectId, key);
+        },
+        set: (key: string, value: any) => {
+          if (typeof window === "undefined") return;
+          FlagStorageService.set(abbyConfig.projectId, key, value);
+        },
       },
-    },
-    {
-      get: (key: string) => {
-        if (typeof window === "undefined") return null;
-        return FlagStorageService.get(abbyConfig.projectId, key);
-      },
-      set: (key: string, value: any) => {
-        if (typeof window === "undefined") return;
-        FlagStorageService.set(abbyConfig.projectId, key, value);
-      },
-    },
-    {
-      get: (key: string) => {
-        if (typeof window === "undefined") return null;
-        return RemoteConfigStorageService.get(abbyConfig.projectId, key);
-      },
-      set: (key: string, value: any) => {
-        if (typeof window === "undefined") return;
-        RemoteConfigStorageService.set(abbyConfig.projectId, key, value);
-      },
-    }
-  );
+      {
+        get: (key: string) => {
+          if (typeof window === "undefined") return null;
+          return RemoteConfigStorageService.get(abbyConfig.projectId, key);
+        },
+        set: (key: string, value: any) => {
+          if (typeof window === "undefined") return;
+          RemoteConfigStorageService.set(abbyConfig.projectId, key, value);
+        },
+      }
+    );
+
+  const abby = createAbbyInstance();
 
   type AbbyProjectData = ReturnType<typeof abby.getProjectData>;
 
@@ -345,23 +348,28 @@ export function createAbby<
 
   const abbyPlugin: Plugin<[AbbyPluginOptions?]> = {
     install(app: App, options?: AbbyPluginOptions) {
-      const initialProjectData = options?.initialData
-        ? abby.init(options.initialData)
-        : abby.getProjectData();
+      const targetAbby =
+        typeof window === "undefined" ? createAbbyInstance() : abby;
 
       if (options?.cookies) {
-        abby.setLocalOverrides(options.cookies);
+        targetAbby.setLocalOverrides(options.cookies);
       }
+
+      const initialProjectData = options?.initialData
+        ? targetAbby.init(options.initialData)
+        : targetAbby.getProjectData();
 
       const data = ref(initialProjectData) as Ref<AbbyProjectData>;
       app.provide(AbbyContextKey, data);
 
-      abby.subscribe((newData) => {
-        data.value = newData;
-      });
+      if (typeof window !== "undefined") {
+        targetAbby.subscribe((newData) => {
+          data.value = newData;
+        });
+      }
 
       if (!options?.initialData && typeof window !== "undefined") {
-        abby.loadProjectData().then((loadedData) => {
+        targetAbby.loadProjectData().then((loadedData) => {
           if (!loadedData) return;
           data.value = loadedData;
         });
@@ -484,6 +492,7 @@ export function createAbby<
   ) => {
     return async (event?: any) => {
       const result = (await handler?.(event)) ?? ({} as T);
+      const requestAbby = createAbbyInstance();
       const __abby__data = await HttpService.getProjectData({
         url: config.apiUrl,
         projectId: config.projectId,
@@ -496,10 +505,10 @@ export function createAbby<
         event?.request?.headers?.get?.("cookie");
 
       if (__abby__data) {
-        abby.init(__abby__data);
+        requestAbby.init(__abby__data);
       }
       if (cookieHeader) {
-        abby.setLocalOverrides(cookieHeader);
+        requestAbby.setLocalOverrides(cookieHeader);
       }
 
       return {

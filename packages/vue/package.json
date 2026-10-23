@@ -24,7 +24,6 @@
   "license": "ISC",
   "devDependencies": {
     "@testing-library/jest-dom": "^5.16.5",
-    "@tryabby/devtools": "workspace:*",
     "@types/js-cookie": "^3.0.3",
     "@vitejs/plugin-vue": "^5.1.2",
     "@vue/test-utils": "^2.4.6",
@@ -43,6 +42,7 @@
   },
   "dependencies": {
     "@tryabby/core": "workspace:*",
+    "@tryabby/devtools": "workspace:*",
     "js-cookie": "^3.0.1"
   }
 }
