@@ -177,3 +177,128 @@ describe("getRemoteConfig", () => {
     expect(serverSideDOM).toContain("FooBar");
   });
 });
+
+describe("SSR user properties and configuration isolation", () => {
+  it("applies user properties to targetAbby before init evaluates flag rules in SSR", async () => {
+    const { AbbyProvider, useFeatureFlag } = createAbby({
+      environments: [""],
+      currentEnvironment: "",
+      projectId: "123",
+      flags: ["betaFeature"],
+      user: {
+        role: "String",
+      },
+    });
+
+    const ComponentWithFlag = defineComponent({
+      setup() {
+        const beta = useFeatureFlag("betaFeature");
+        return () => h("span", { "data-testid": "beta" }, beta.value ? "ENABLED" : "DISABLED");
+      },
+    });
+
+    const initialData = {
+      flags: [
+        {
+          name: "betaFeature",
+          value: false,
+          ruleSet: {
+            operator: "and" as const,
+            rules: [
+              {
+                property: "role",
+                operator: "eq" as const,
+                value: "admin",
+                type: "string" as const,
+              },
+            ],
+          },
+        },
+      ],
+      tests: [],
+      remoteConfig: [],
+    };
+
+    const AppWithAdmin = defineComponent({
+      setup() {
+        return () =>
+          h(
+            AbbyProvider,
+            {
+              initialData,
+              user: { role: "admin" },
+            },
+            { default: () => h(ComponentWithFlag) }
+          );
+      },
+    });
+
+    const AppWithUser = defineComponent({
+      setup() {
+        return () =>
+          h(
+            AbbyProvider,
+            {
+              initialData,
+              user: { role: "viewer" },
+            },
+            { default: () => h(ComponentWithFlag) }
+          );
+      },
+    });
+
+    const domAdmin = await renderToString(createSSRApp(AppWithAdmin));
+    expect(domAdmin).toContain("ENABLED");
+
+    const domUser = await renderToString(createSSRApp(AppWithUser));
+    expect(domUser).toContain("DISABLED");
+  });
+
+  it("does not mutate shared config cookies across SSR renders", async () => {
+    const config = {
+      environments: [""],
+      currentEnvironment: "",
+      projectId: "test_proj",
+      tests: {
+        heroTest: {
+          variants: ["A", "B"],
+        },
+      },
+      cookies: {
+        disableByDefault: true,
+      },
+    };
+
+    const { AbbyProvider, useAbby } = createAbby(config);
+
+    const TestComp = defineComponent({
+      setup() {
+        const { variant } = useAbby("heroTest");
+        return () => h("span", (variant.value as string) || "none");
+      },
+    });
+
+    const AppWithConsent = defineComponent({
+      setup() {
+        return () =>
+          h(
+            AbbyProvider,
+            {
+              cookies: "test_proj_$_abcc_$=true",
+              initialData: {
+                flags: [],
+                tests: [{ name: "heroTest", weights: [0.5, 0.5] }],
+                remoteConfig: [],
+              },
+            },
+            { default: () => h(TestComp) }
+          );
+      },
+    });
+
+    await renderToString(createSSRApp(AppWithConsent));
+
+    // Verify original config.cookies.disableByDefault was NOT mutated
+    expect(config.cookies.disableByDefault).toBe(true);
+  });
+});

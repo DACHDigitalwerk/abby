@@ -48,9 +48,14 @@ export type ABTestReturnValue<Lookup, TestVariant> = Lookup extends undefined
     ? Lookup[TestVariant]
     : never;
 
-export type AbbyPluginOptions = {
+export type AbbyPluginOptions<User = Record<string, ValidatorType>> = {
   initialData?: AbbyDataResponse;
   cookies?: string;
+  user?: User extends Record<string, ValidatorType>
+    ? Partial<{
+        -readonly [K in keyof User]: Infer<User[K]>;
+      }>
+    : Record<string, any>;
 };
 
 export function createAbby<
@@ -75,7 +80,52 @@ export function createAbby<
 ) {
   const config = abbyConfig;
 
-  const createAbbyInstance = () =>
+  type UserProperties = Partial<{
+    -readonly [K in keyof User]: Infer<User[K]>;
+  }>;
+
+  let ssrUserProperties: UserProperties | null = null;
+
+  const cloneConfig = (
+    cfg: AbbyConfig<
+      FlagName,
+      Tests,
+      string[],
+      RemoteConfigName,
+      RemoteConfig,
+      User
+    >
+  ): AbbyConfig<
+    FlagName,
+    Tests,
+    string[],
+    RemoteConfigName,
+    RemoteConfig,
+    User
+  > => ({
+    ...cfg,
+    cookies: cfg.cookies ? { ...cfg.cookies } : undefined,
+    settings: cfg.settings
+      ? {
+          ...cfg.settings,
+          flags: cfg.settings.flags ? { ...cfg.settings.flags } : undefined,
+          remoteConfig: cfg.settings.remoteConfig
+            ? { ...cfg.settings.remoteConfig }
+            : undefined,
+        }
+      : undefined,
+  });
+
+  const createAbbyInstance = (
+    instanceConfig: AbbyConfig<
+      FlagName,
+      Tests,
+      string[],
+      RemoteConfigName,
+      RemoteConfig,
+      User
+    > = abbyConfig
+  ) =>
     new Abby<
       FlagName,
       TestName,
@@ -85,36 +135,39 @@ export function createAbby<
       string[],
       User
     >(
-      abbyConfig,
+      instanceConfig,
       {
         get: (key: string) => {
           if (typeof window === "undefined") return null;
-          return TestStorageService.get(abbyConfig.projectId, key);
+          return TestStorageService.get(instanceConfig.projectId, key);
         },
         set: (key: string, value: any) => {
-          if (typeof window === "undefined" || config.cookies?.disableByDefault)
+          if (
+            typeof window === "undefined" ||
+            instanceConfig.cookies?.disableByDefault
+          )
             return;
-          TestStorageService.set(abbyConfig.projectId, key, value);
+          TestStorageService.set(instanceConfig.projectId, key, value);
         },
       },
       {
         get: (key: string) => {
           if (typeof window === "undefined") return null;
-          return FlagStorageService.get(abbyConfig.projectId, key);
+          return FlagStorageService.get(instanceConfig.projectId, key);
         },
         set: (key: string, value: any) => {
           if (typeof window === "undefined") return;
-          FlagStorageService.set(abbyConfig.projectId, key, value);
+          FlagStorageService.set(instanceConfig.projectId, key, value);
         },
       },
       {
         get: (key: string) => {
           if (typeof window === "undefined") return null;
-          return RemoteConfigStorageService.get(abbyConfig.projectId, key);
+          return RemoteConfigStorageService.get(instanceConfig.projectId, key);
         },
         set: (key: string, value: any) => {
           if (typeof window === "undefined") return;
-          RemoteConfigStorageService.set(abbyConfig.projectId, key, value);
+          RemoteConfigStorageService.set(instanceConfig.projectId, key, value);
         },
       }
     );
@@ -308,13 +361,26 @@ export function createAbby<
         type: String,
         required: false,
       },
+      user: {
+        type: Object as PropType<UserProperties>,
+        required: false,
+      },
     },
     setup(props, { slots }) {
       const targetAbby =
-        typeof window === "undefined" ? createAbbyInstance() : abby;
+        typeof window === "undefined"
+          ? createAbbyInstance(cloneConfig(abbyConfig))
+          : abby;
 
       if (props.cookies) {
         targetAbby.setLocalOverrides(props.cookies);
+      }
+
+      const userProps =
+        props.user ??
+        (typeof window === "undefined" ? ssrUserProperties : null);
+      if (userProps) {
+        targetAbby.updateUserProperties(userProps);
       }
 
       const initialProjectData = props.initialData
@@ -349,13 +415,22 @@ export function createAbby<
     },
   });
 
-  const abbyPlugin: Plugin<[AbbyPluginOptions?]> = {
-    install(app: App, options?: AbbyPluginOptions) {
+  const abbyPlugin: Plugin<[AbbyPluginOptions<User>?]> = {
+    install(app: App, options?: AbbyPluginOptions<User>) {
       const targetAbby =
-        typeof window === "undefined" ? createAbbyInstance() : abby;
+        typeof window === "undefined"
+          ? createAbbyInstance(cloneConfig(abbyConfig))
+          : abby;
 
       if (options?.cookies) {
         targetAbby.setLocalOverrides(options.cookies);
+      }
+
+      const userProps =
+        options?.user ??
+        (typeof window === "undefined" ? ssrUserProperties : null);
+      if (userProps) {
+        targetAbby.updateUserProperties(userProps);
       }
 
       const initialProjectData = options?.initialData
@@ -479,11 +554,13 @@ export function createAbby<
     return abby.getVariants(name);
   };
 
-  const updateUserProperties = (
-    user: Partial<{
-      -readonly [K in keyof User]: Infer<User[K]>;
-    }>
-  ) => {
+  const updateUserProperties = (user: UserProperties) => {
+    if (typeof window === "undefined") {
+      ssrUserProperties = {
+        ...ssrUserProperties,
+        ...user,
+      };
+    }
     abby.updateUserProperties(user);
   };
 
@@ -491,11 +568,14 @@ export function createAbby<
    * Nuxt / SSR helper to load Abby project data on the server and apply request cookies
    */
   const withAbby = <T extends Record<string, any> = Record<string, any>>(
-    handler?: (event?: any) => Promise<T> | T
+    handler?: (event?: any) => Promise<T> | T,
+    options?: {
+      user?: UserProperties;
+    }
   ) => {
     return async (event?: any) => {
       const result = (await handler?.(event)) ?? ({} as T);
-      const requestAbby = createAbbyInstance();
+      const requestAbby = createAbbyInstance(cloneConfig(abbyConfig));
       const __abby__data = await HttpService.getProjectData({
         url: config.apiUrl,
         projectId: config.projectId,
@@ -507,11 +587,18 @@ export function createAbby<
         event?.node?.req?.headers?.cookie ??
         event?.request?.headers?.get?.("cookie");
 
-      if (__abby__data) {
-        requestAbby.init(__abby__data);
+      const userProps =
+        options?.user ?? event?.context?.user ?? ssrUserProperties;
+      if (userProps) {
+        requestAbby.updateUserProperties(userProps);
       }
+
       if (cookieHeader) {
         requestAbby.setLocalOverrides(cookieHeader);
+      }
+
+      if (__abby__data) {
+        requestAbby.init(__abby__data);
       }
 
       return {
