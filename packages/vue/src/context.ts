@@ -84,8 +84,6 @@ export function createAbby<
     -readonly [K in keyof User]: Infer<User[K]>;
   }>;
 
-  let ssrUserProperties: UserProperties | null = null;
-
   const cloneConfig = (
     cfg: AbbyConfig<
       FlagName,
@@ -376,11 +374,8 @@ export function createAbby<
         targetAbby.setLocalOverrides(props.cookies);
       }
 
-      const userProps =
-        props.user ??
-        (typeof window === "undefined" ? ssrUserProperties : null);
-      if (userProps) {
-        targetAbby.updateUserProperties(userProps);
+      if (props.user) {
+        targetAbby.updateUserProperties(props.user);
       }
 
       const initialProjectData = props.initialData
@@ -426,11 +421,8 @@ export function createAbby<
         targetAbby.setLocalOverrides(options.cookies);
       }
 
-      const userProps =
-        options?.user ??
-        (typeof window === "undefined" ? ssrUserProperties : null);
-      if (userProps) {
-        targetAbby.updateUserProperties(userProps);
+      if (options?.user) {
+        targetAbby.updateUserProperties(options.user as any);
       }
 
       const initialProjectData = options?.initialData
@@ -555,12 +547,8 @@ export function createAbby<
   };
 
   const updateUserProperties = (user: UserProperties) => {
-    if (typeof window === "undefined") {
-      ssrUserProperties = {
-        ...ssrUserProperties,
-        ...user,
-      };
-    }
+    // Server: pass `user` through AbbyProvider props, plugin options or withAbby options instead.
+    if (typeof window === "undefined") return;
     abby.updateUserProperties(user);
   };
 
@@ -575,7 +563,6 @@ export function createAbby<
   ) => {
     return async (event?: any) => {
       const result = (await handler?.(event)) ?? ({} as T);
-      const requestAbby = createAbbyInstance(cloneConfig(abbyConfig));
       const __abby__data = await HttpService.getProjectData({
         url: config.apiUrl,
         projectId: config.projectId,
@@ -587,24 +574,13 @@ export function createAbby<
         event?.node?.req?.headers?.cookie ??
         event?.request?.headers?.get?.("cookie");
 
-      const userProps =
-        options?.user ?? event?.context?.user ?? ssrUserProperties;
-      if (userProps) {
-        requestAbby.updateUserProperties(userProps);
-      }
-
-      if (cookieHeader) {
-        requestAbby.setLocalOverrides(cookieHeader);
-      }
-
-      if (__abby__data) {
-        requestAbby.init(__abby__data);
-      }
+      const userProps = options?.user;
 
       return {
         ...result,
         __abby__data,
         __abby_cookie: cookieHeader,
+        __abby_user: userProps,
       };
     };
   };

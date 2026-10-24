@@ -565,4 +565,20 @@ describe("abbyPlugin & withAbby (Vue 3 Plugin + Nuxt 3 SSR helper)", () => {
     expect(res.__abby__data).toBeDefined();
     expect(res.__abby_cookie).toContain("__abby_ff_123_flag1=false");
   });
+
+  it("forwards user properties cleanly in withAbby options", async () => {
+    const { withAbby } = createAbby({
+      environments: ["prod"],
+      currentEnvironment: "prod",
+      projectId: "123",
+      flags: ["flag1"],
+    });
+
+    const loader = withAbby(async () => ({ ok: true }), {
+      user: { role: "tester" } as any,
+    });
+    const res = await loader();
+    expect(res.ok).toBe(true);
+    expect(res.__abby_user).toEqual({ role: "tester" });
+  });
 });

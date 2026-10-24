@@ -186,7 +186,7 @@ describe("SSR user properties and configuration isolation", () => {
       projectId: "123",
       flags: ["betaFeature"],
       user: {
-        role: "String",
+        role: { type: "string" as const },
       },
     });
 
@@ -202,17 +202,20 @@ describe("SSR user properties and configuration isolation", () => {
         {
           name: "betaFeature",
           value: false,
-          ruleSet: {
-            operator: "and" as const,
-            rules: [
-              {
-                property: "role",
-                operator: "eq" as const,
-                value: "admin",
-                type: "string" as const,
-              },
-            ],
-          },
+          ruleSet: [
+            {
+              operator: "and" as const,
+              thenValue: true,
+              rules: [
+                {
+                  propertyName: "role",
+                  operator: "eq" as const,
+                  value: "admin",
+                  propertyType: "string" as const,
+                },
+              ],
+            },
+          ],
         },
       ],
       tests: [],
@@ -300,5 +303,73 @@ describe("SSR user properties and configuration isolation", () => {
 
     // Verify original config.cookies.disableByDefault was NOT mutated
     expect(config.cookies.disableByDefault).toBe(true);
+  });
+
+  it("does not leak updateUserProperties across SSR requests", async () => {
+    const { AbbyProvider, useFeatureFlag, updateUserProperties } = createAbby({
+      environments: [""],
+      currentEnvironment: "",
+      projectId: "leak_test",
+      flags: ["adminOnly"],
+      user: {
+        role: { type: "string" as const },
+      },
+    });
+
+    const FlagComp = defineComponent({
+      setup() {
+        const flag = useFeatureFlag("adminOnly");
+        return () => h("span", flag.value ? "ADMIN_ENABLED" : "ADMIN_DISABLED");
+      },
+    });
+
+    const initialData = {
+      flags: [
+        {
+          name: "adminOnly",
+          value: false,
+          ruleSet: [
+            {
+              operator: "and" as const,
+              thenValue: true,
+              rules: [
+                {
+                  propertyName: "role",
+                  operator: "eq" as const,
+                  value: "admin",
+                  propertyType: "string" as const,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      tests: [],
+      remoteConfig: [],
+    };
+
+    // Calling updateUserProperties during SSR should be a no-op and never pollute module state
+    const originalWindow = global.window;
+    try {
+      delete (global as any).window;
+      updateUserProperties({ role: "admin" });
+    } finally {
+      (global as any).window = originalWindow;
+    }
+
+    // Subsequent SSR render without user prop must NOT inherit the admin role
+    const AppWithoutUser = defineComponent({
+      setup() {
+        return () =>
+          h(
+            AbbyProvider,
+            { initialData },
+            { default: () => h(FlagComp) }
+          );
+      },
+    });
+
+    const dom = await renderToString(createSSRApp(AppWithoutUser));
+    expect(dom).toContain("ADMIN_DISABLED");
   });
 });
