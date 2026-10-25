@@ -553,6 +553,32 @@ export function createAbby<
   };
 
   /**
+   * Enables A/B test assignment cookies on the client and notifies subscribers
+   */
+  const enableCookies = () => {
+    if (typeof window === "undefined") return;
+    abby.enableCookies();
+  };
+
+  /**
+   * Disables A/B test assignment cookies on the client, removes persisted test cookies, and notifies subscribers
+   */
+  const disableCookies = () => {
+    if (typeof window === "undefined") return;
+    abby.disableCookies();
+    for (const testName of Object.keys(config.tests ?? {})) {
+      TestStorageService.remove(config.projectId, testName);
+    }
+  };
+
+  /**
+   * Loads the latest Abby project data from the server / CDN
+   */
+  const loadProjectData = () => {
+    return abby.loadProjectData();
+  };
+
+  /**
    * Nuxt / SSR helper to load Abby project data on the server and apply request cookies
    */
   const withAbby = <T extends Record<string, any> = Record<string, any>>(
@@ -602,5 +628,8 @@ export function createAbby<
     useFeatureFlags,
     useRemoteConfigVariables,
     updateUserProperties,
+    enableCookies,
+    disableCookies,
+    loadProjectData,
   };
 }

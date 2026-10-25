@@ -581,4 +581,34 @@ describe("abbyPlugin & withAbby (Vue 3 Plugin + Nuxt 3 SSR helper)", () => {
     expect(res.ok).toBe(true);
     expect(res.__abby_user).toEqual({ role: "tester" });
   });
+
+  it("supports enableCookies, disableCookies, and loadProjectData helpers", async () => {
+    const removeSpy = vi.spyOn(TestStorageService, "remove");
+    const {
+      enableCookies,
+      disableCookies,
+      loadProjectData,
+      __abby__,
+    } = createAbby({
+      environments: ["prod"],
+      currentEnvironment: "prod",
+      projectId: "123",
+      tests: {
+        hero: { variants: ["A", "B"] },
+      },
+      cookies: {
+        disableByDefault: true,
+      },
+    });
+
+    enableCookies();
+    expect(__abby__.getConfig().cookies?.disableByDefault).toBe(false);
+
+    disableCookies();
+    expect(__abby__.getConfig().cookies?.disableByDefault).toBe(true);
+    expect(removeSpy).toHaveBeenCalledWith("123", "hero");
+
+    const data = await loadProjectData();
+    expect(data).toBeDefined();
+  });
 });
